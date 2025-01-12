@@ -46,15 +46,16 @@ def get_options_chain(symbol: str):
     if response.status_code == 200:
         return response.json()
     else:
-        st.error(f"Failed to fetch options chain for {symbol}. Status code: {response.status_code}")
+        st.error(f"❌ Failed to fetch options chain for {symbol}. Status code: {response.status_code}")
         return None
+
 
 def fetch_option_price(symbol: str, expiration: str, strike: float, call_put: str) -> float:
     """
     1) Calls get_options_chain(symbol).
     2) Searches for the given expiration, call/put dict, and strike.
-    3) If found, compute mid-price = (bid + ask)/2. Return it.
-    4) If not found, raise an exception or return None.
+    3) If found, compute mid-price = (bid + ask)/2 and return it.
+    4) If not found, raise an exception.
     """
     data = get_options_chain(symbol)
     if not data or "options" not in data:
@@ -69,7 +70,7 @@ def fetch_option_price(symbol: str, expiration: str, strike: float, call_put: st
     if not cp_dict:
         raise ValueError(f"No {call_put} data found for expiration {expiration} in chain.")
 
-    # Convert float strike to a "xx.xx" string to match how strikes appear in the chain
+    # Convert float strike to "xx.xx" string to match how strikes appear in the JSON
     strike_key = f"{strike:.2f}"
     if strike_key not in cp_dict:
         raise ValueError(f"Strike {strike} not found for {call_put} {expiration} {symbol}.")
@@ -95,7 +96,7 @@ def fetch_share_price(ticker: str) -> float:
         if len(data) > 0:
             return float(data["Close"].iloc[-1])
     except:
-        pass
+        st.error(f'❌ Failed Fetching {ticker} Price')
     return 0.0
 
 # -------------------------------------------------------------------------
@@ -111,9 +112,11 @@ def load_settings() -> pd.DataFrame:
     data = resp.data
     return pd.DataFrame(data) if data else pd.DataFrame()
 
+
 def save_settings(original_capital: float):
     supabase.table("settings").upsert({"id": 1, "original_capital": original_capital}, on_conflict="id").execute()
     st.rerun()
+
 
 # ---- SHARES ----
 def load_shares() -> pd.DataFrame:
@@ -129,6 +132,7 @@ def load_shares() -> pd.DataFrame:
     data = resp.data
     return pd.DataFrame(data) if data else pd.DataFrame()
 
+
 def upsert_share(ticker: str, shares_held: float, avg_cost: float, current_price: float):
     """
     Recompute unreal_pl = (current_price - avg_cost)*shares_held.
@@ -143,6 +147,7 @@ def upsert_share(ticker: str, shares_held: float, avg_cost: float, current_price
         "unrealized_pl": unreal_pl
     }, on_conflict="ticker").execute()
     st.rerun()
+
 
 def delete_share(ticker: str):
     supabase.table("portfolio_shares").delete().eq("ticker", ticker).execute()
@@ -165,6 +170,7 @@ def load_options() -> pd.DataFrame:
     resp = supabase.table("portfolio_options").select("*").execute()
     data = resp.data
     return pd.DataFrame(data) if data else pd.DataFrame()
+
 
 def upsert_option(opt_id: int, symbol: str, call_put: str, expiration: str, strike: float,
                   contracts_held: float, avg_cost: float, current_price: float):
@@ -189,6 +195,7 @@ def upsert_option(opt_id: int, symbol: str, call_put: str, expiration: str, stri
         supabase.table("portfolio_options").update(data_dict).eq("id", opt_id).execute()
     st.rerun()
 
+
 def delete_option(row_id: int):
     supabase.table("portfolio_options").delete().eq("id", row_id).execute()
     st.rerun()
@@ -199,8 +206,10 @@ def load_performance() -> pd.DataFrame:
     data = resp.data
     return pd.DataFrame(data) if data else pd.DataFrame()
 
+
 def upsert_performance(date_str: str, total_value: float):
     supabase.table("performance").upsert({"date": date_str, "total_value": total_value}, on_conflict="date").execute()
+    # note: no st.rerun() here because we don't want to forcibly refresh when performance is recorded
 
 # -------------------------------------------------------------------------
 # 5) Automatic Refresh (Once Per Session)
@@ -223,6 +232,7 @@ def refresh_shares_prices():
             "current_price": current_px,
             "unrealized_pl": unreal_pl
         }, on_conflict="ticker").execute()
+
 
 def refresh_options_prices():
     opt_df = load_options()
@@ -251,6 +261,7 @@ def refresh_options_prices():
             "unrealized_pl": unreal_pl
         }).eq("id", opt_id).execute()
 
+
 def record_daily_performance():
     """
     total_shares_val = sum( shares_held * current_price )
@@ -265,6 +276,7 @@ def record_daily_performance():
     total_val = float(total_shares_val + total_opts_val)
     today_str = datetime.date.today().strftime("%Y-%m-%d")
     upsert_performance(today_str, total_val)
+
 
 def refresh_all_once():
     if "did_refresh" not in st.session_state:
@@ -281,7 +293,7 @@ def refresh_all_once():
 # -------------------------------------------------------------------------
 def main():
     st.set_page_config(page_title="EFI Portfolio Tracker", layout="wide")
-    st.title("EFI Portfolio Tracker")
+    st.title("EFI Portfolio Tracker ⚡")
 
     # 1) Automatic refresh once per session
     refresh_all_once()
@@ -314,37 +326,45 @@ def main():
 
     total_account_val = float(total_shares_val + total_opts_val + orig_capital)
 
+    # Calculate how much we've spent on shares and options
     spentSharesVal = (shares_df["shares_held"] * shares_df["avg_cost"]).sum() if not shares_df.empty else 0.0
     spentOptsVal = ((opt_df["contracts_held"] * 100) * opt_df["avg_cost"]).sum() if not opt_df.empty else 0.0
 
+    # Buying Power = Original Capital - total money spent on shares & options
     buyingPower = orig_capital - spentOptsVal - spentSharesVal
 
     colA[1].number_input("Total Account ($)", value=total_account_val, step=500.0, disabled=True, key="acct_disabled")
     colA[2].number_input("Shares Portion ($)", value=total_shares_val, step=500.0, disabled=True, key="shares_disabled")
     colA[3].number_input("Options Portion ($)", value=total_opts_val, step=500.0, disabled=True, key="opts_disabled")
-    colA[4].number_input(f"Buying Power ($) - {round(((buyingPower/total_account_val) * 100),2)}%", value=buyingPower, step=500.0, disabled=True, key="bp_disabled")
+    colA[4].number_input(
+        f"Buying Power ($) - {round(((buyingPower/total_account_val) * 100),2)}%",
+        value=buyingPower,
+        step=500.0,
+        disabled=True,
+        key="bp_disabled"
+    )
 
-    if st.button("Save Original Capital"):
+    if st.button("💾 Save Original Capital"):
         save_settings(orig_capital)
-        st.success("Saved Original Capital.")
+        st.success("💾 Saved Original Capital!")
 
     st.write("---")
 
     # 4) TABS: Shares, Options, Performance
-    tab_shares, tab_opts, tab_perf = st.tabs(["Shares", "Options", "Performance"])
+    tab_shares, tab_opts, tab_perf = st.tabs(["📈 Shares", "🧩 Options", "📊 Performance"])
 
     # -------------------------- SHARES TAB --------------------------
     with tab_shares:
-        st.markdown("## Shares Portfolio")
+        st.markdown("## Shares Portfolio 🚀")
         shares_df = load_shares()  # re-load
 
         if shares_df.empty:
-            st.info("No shares in portfolio yet.")
+            st.info("No shares in portfolio yet. Add some below! 🌱")
         else:
             # Add columns for "Currently Invested" and "% of Portfolio"
             df_disp = shares_df.copy()
-            df_disp["Position Value"] = df_disp["shares_held"] * df_disp["current_price"]  # shares * current_price
-            df_disp["Currently Invested"] = df_disp["shares_held"] * df_disp["avg_cost"]   # shares * avg_cost
+            df_disp["Position Value"] = df_disp["shares_held"] * df_disp["current_price"]
+            df_disp["Currently Invested"] = df_disp["shares_held"] * df_disp["avg_cost"]
 
             # If total_account_val > 0, compute. Otherwise 0.
             if total_account_val > 0:
@@ -379,7 +399,7 @@ def main():
                 use_container_width=True
             )
 
-        st.subheader("Add / Update Shares")
+        st.subheader("Add / Update Shares 🏗️")
         # Weighted average cost approach:
         tickers = shares_df["ticker"].tolist() if not shares_df.empty else []
         sel_share = st.selectbox("Select existing Ticker or create new", tickers + ["(New)"], key="sel_share")
@@ -398,7 +418,12 @@ def main():
                 old_shares, old_avg = 0.0, 0.0
 
         shares_to_add = st.number_input("Shares to Add (negative to reduce)", step=1.0, key="shares_to_add")
-        purchase_price = st.number_input("Purchase Price per share", value=fetch_share_price(ticker_val), step=1.0, key="purchase_price_shares")
+        purchase_price = st.number_input(
+            "Purchase Price per share",
+            value=fetch_share_price(ticker_val),
+            step=1.0,
+            key="purchase_price_shares"
+        )
 
         if st.button("Submit (Shares)"):
             total_shares = old_shares + shares_to_add
@@ -417,22 +442,22 @@ def main():
 
                 current_px = fetch_share_price(ticker_val)
                 upsert_share(ticker_val, total_shares, new_avg, current_px)
-                st.success(f"Updated {ticker_val} with total shares={total_shares:.2f}, avg_cost={new_avg:.2f}")
+                st.success(f"✅ Updated {ticker_val} with total shares={total_shares:.2f}, avg_cost={new_avg:.2f}")
 
-        st.subheader("Delete Entire Share Position")
+        st.subheader("Delete Entire Share Position 🗑️")
         del_ticker_sh = st.selectbox("Select Ticker to Delete Entirely", ["(None)"] + tickers, key="del_sh_sel")
         if del_ticker_sh != "(None)":
             if st.button("Confirm Delete (Shares)"):
                 delete_share(del_ticker_sh)
-                st.warning(f"Deleted entire {del_ticker_sh} share position.")
+                st.warning(f"🗑️ Deleted entire {del_ticker_sh} share position.")
 
     # -------------------------- OPTIONS TAB --------------------------
     with tab_opts:
-        st.markdown("## Options Portfolio")
+        st.markdown("## Options Portfolio 🔧")
         opt_df = load_options()  # re-load
 
         if opt_df.empty:
-            st.info("No options in portfolio yet.")
+            st.info("No options in portfolio yet. Add some below! 🤔")
         else:
             df_o = opt_df.copy()
             df_o["Position Value"] = df_o["contracts_held"] * 100 * df_o["current_price"]
@@ -446,7 +471,8 @@ def main():
 
             df_o = df_o[[
                 "id", "symbol", "call_put", "expiration", "strike", "contracts_held",
-                "avg_cost", "current_price", "Currently Invested", "Position Value", "unrealized_pl", "% of Portfolio"
+                "avg_cost", "current_price", "Currently Invested", "Position Value",
+                "unrealized_pl", "% of Portfolio"
             ]]
 
             df_o = df_o.rename(columns={
@@ -474,7 +500,7 @@ def main():
                 use_container_width=True
             )
 
-        st.subheader("Add / Update an Option")
+        st.subheader("Add / Update an Option 🔧")
         existing_opts = []
         if not opt_df.empty:
             for _, ro in opt_df.iterrows():
@@ -514,11 +540,11 @@ def main():
                 # fully closed
                 if opt_id is not None:
                     delete_option(opt_id)
-                    st.warning("Closed out that option entirely.")
+                    st.warning("Option closed out entirely. 🗑️")
             else:
                 new_avg_opt = 0.0
                 if old_contracts + contracts_to_add != 0:
-                    new_avg_opt = (old_contracts * old_avg + contracts_to_add * purchase_price_opt) / total_contracts
+                    new_avg_opt = ((old_contracts * old_avg) + (contracts_to_add * purchase_price_opt)) / total_contracts
 
                 # fetch current price from your method
                 exp_str = str(exp_in) if isinstance(exp_in, datetime.date) else exp_in
@@ -534,31 +560,37 @@ def main():
                     new_avg_opt,
                     current_opt_px
                 )
-                st.success(f"Updated Option: {symbol_input} {call_put_input}, total_contracts={total_contracts:.2f}, avg={new_avg_opt:.2f}")
+                st.success(
+                    f"✅ Updated Option: {symbol_input} {call_put_input}, "
+                    f"total_contracts={total_contracts:.2f}, avg={new_avg_opt:.2f}"
+                )
 
-        st.subheader("Delete an Option Entirely")
+        st.subheader("Delete an Option Entirely 🗑️")
         del_opt_sel = st.selectbox("Select Option to Delete", ["(None)"] + existing_opts, key="del_opt_sel")
         if del_opt_sel != "(None)":
             if st.button("Confirm Delete (Option)"):
                 del_id = int(del_opt_sel.split(":")[0])
                 delete_option(del_id)
-                st.warning(f"Deleted option ID {del_id}.")
+                st.warning(f"🗑️ Deleted option ID {del_id}.")
 
     # -------------------------- PERFORMANCE TAB --------------------------
     with tab_perf:
-        st.markdown("## Performance History")
+        st.markdown("## Performance History 📊")
         perf_df = load_performance()
         if perf_df.empty:
-            st.info("No performance records yet.")
+            st.info("No performance records yet. 📉")
         else:
             perf_df = perf_df.sort_values("date")
-            st.line_chart(perf_df.set_index("date")["total_value"])
+            st.line_chart(perf_df.set_index("date")["total_value"], height=300)
             st.dataframe(
                 perf_df.style.format({"total_value": "{:.2f}"}),
                 use_container_width=True
             )
 
-        st.caption("Performance is automatically recorded once per session (first load), overwriting today's record if present.")
+        st.caption(
+            "📅 Performance is **automatically recorded once per session** (first load), "
+            "overwriting today's record if present."
+        )
 
 
 if __name__ == "__main__":
