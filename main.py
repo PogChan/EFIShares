@@ -280,8 +280,8 @@ def refresh_all_once():
 # 6) Main App
 # -------------------------------------------------------------------------
 def main():
-    st.set_page_config(page_title="Shares & Options Tracker", layout="wide")
-    st.title("Portfolio Tracker (Shares + Options, No Manual Current Price)")
+    st.set_page_config(page_title="EFI Portfolio Tracker", layout="wide")
+    st.title("EFI Portfolio Tracker")
 
     # 1) Automatic refresh once per session
     refresh_all_once()
