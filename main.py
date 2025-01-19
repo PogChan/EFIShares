@@ -8,6 +8,8 @@ import os
 from supabase import create_client, Client
 import yfinance as yf
 
+
+
 # -------------------------------------------------------------------------
 # 1) Supabase / Environment Setup
 # -------------------------------------------------------------------------
@@ -267,7 +269,7 @@ def refresh_all_once():
 # -------------------------------------------------------------------------
 def color_unreal_pl(val):
     if val > 0:
-        return "color: green"
+        return "color: #65FE08"
     elif val < 0:
         return "color: red"
     else:
@@ -281,7 +283,7 @@ def log_shares_activity(ticker: str, shares_added: float, price: float):
     Log share activity, highlighting the action type, quantity, price, and total cost.
     """
     action = "BUYING" if shares_added > 0 else "SELLING"
-    color = "green" if shares_added > 0 else "red"
+    color = "#65FE08" if shares_added > 0 else "red"
     sign = "+" if shares_added > 0 else ""
     cost = price * shares_added
     now_str = datetime.datetime.now().strftime("%m/%d/%Y %I:%M%p")
@@ -298,7 +300,7 @@ def log_options_activity(opt_id, symbol, call_put, expiration, strike, contracts
     Log options activity, highlighting the action type, quantity, price, total cost, and expiration.
     """
     action = "BOUGHT" if contracts_added > 0 else "SOLD"
-    color = "green" if contracts_added > 0 else "red"
+    color = "#65FE08" if contracts_added > 0 else "red"
     sign = "+" if contracts_added > 0 else ""
     total_cost = price * contracts_added * 100
     now_str = datetime.datetime.now().strftime("%m/%d/%Y %I:%M%p")
