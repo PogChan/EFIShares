@@ -281,7 +281,7 @@ def color_unreal_pl(val):
 
 def get_est_time():
     # Get current time in UTC and convert to EST
-    now_est = datetime.now(ZoneInfo("America/New_York"))
+    now_est = datetime.datetime.now(ZoneInfo("America/New_York"))
     return now_est.strftime("%m/%d/%Y %I:%M%p")
 
 def log_shares_activity(ticker: str, shares_added: float, price: float):
