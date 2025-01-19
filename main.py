@@ -288,7 +288,7 @@ def log_shares_activity(ticker: str, shares_added: float, price: float):
     """
     Log share activity, highlighting the action type, quantity, price, and total cost.
     """
-    action = "BUYING" if shares_added > 0 else "SELLING"
+    action = "BOUGHT" if shares_added > 0 else "SOLD"
     color = "#65FE08" if shares_added > 0 else "red"
     sign = "+" if shares_added > 0 else ""
     cost = price * shares_added
