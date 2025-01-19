@@ -290,7 +290,7 @@ def log_shares_activity(ticker: str, shares_added: float, price: float):
 
     msg = (
         f"<b style='color:{color};'>{action} {sign}{shares_added} shares</b> of <b style='color:#FFD700;'>{ticker}</b> "
-        f"at <b>${price:,.2f}</b> (Total: <b style='color:{color};'>{sign}${abs(cost):,.2f}</b>) "
+        f"at <b>\${price:,.2f}</b> (Total: <b style='color:{color};'>{sign}\${abs(cost):,.2f}</b>) "
         f"on {now_str}"
     )
     log_activity(msg)
@@ -309,7 +309,7 @@ def log_options_activity(opt_id, symbol, call_put, expiration, strike, contracts
     msg = (
         f"<b style='color:{color};'>{action} {sign}{contracts_added} contract(s)</b> of "
         f"<b style='color:#FFD700;'> {symbol} {strike:.2f} {call_put} {exp_str}</b> "
-        f"at <b>${price:,.2f}</b> (Total: <b style='color:{color};'>{sign}${abs(total_cost):,.2f}</b>) "
+        f"at <b>\${price:,.2f}</b> (Total: <b style='color:{color};'>{sign}\${abs(total_cost):,.2f}</b>) "
         f"on {now_str}"
     )
     log_activity(msg)
