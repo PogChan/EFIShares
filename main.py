@@ -7,7 +7,7 @@ import datetime
 import os
 from supabase import create_client, Client
 import yfinance as yf
-
+from zoneinfo import ZoneInfo
 
 
 # -------------------------------------------------------------------------
@@ -278,6 +278,12 @@ def color_unreal_pl(val):
 # -------------------------------------------------------------------------
 # 7) Logging Activity: shares or options
 # -------------------------------------------------------------------------
+
+def get_est_time():
+    # Get current time in UTC and convert to EST
+    now_est = datetime.now(ZoneInfo("America/New_York"))
+    return now_est.strftime("%m/%d/%Y %I:%M%p")
+
 def log_shares_activity(ticker: str, shares_added: float, price: float):
     """
     Log share activity, highlighting the action type, quantity, price, and total cost.
@@ -286,7 +292,7 @@ def log_shares_activity(ticker: str, shares_added: float, price: float):
     color = "#65FE08" if shares_added > 0 else "red"
     sign = "+" if shares_added > 0 else ""
     cost = price * shares_added
-    now_str = datetime.datetime.now().strftime("%m/%d/%Y %I:%M%p")
+    now_str = get_est_time()
 
     msg = (
         f"<b style='color:{color};'>{action} {sign}{shares_added} shares</b> of <b style='color:#FFD700;'>{ticker}</b> "
@@ -303,7 +309,7 @@ def log_options_activity(opt_id, symbol, call_put, expiration, strike, contracts
     color = "#65FE08" if contracts_added > 0 else "red"
     sign = "+" if contracts_added > 0 else ""
     total_cost = price * contracts_added * 100
-    now_str = datetime.datetime.now().strftime("%m/%d/%Y %I:%M%p")
+    now_str = get_est_time()
     exp_str = expiration if isinstance(expiration, str) else expiration.strftime("%Y-%m-%d")
 
     msg = (
