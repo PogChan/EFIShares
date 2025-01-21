@@ -23,19 +23,111 @@ baseURL = st.secrets["BASEAPI"]
 # -------------------------------------------------------------------------
 # 2) Option Chain Fetch & Mid-Price Logic
 # -------------------------------------------------------------------------
-@st.cache_data(ttl=60*60)
-def get_options_chain(symbol: str):
-    time.sleep(1)  # simulate some network delay
-    full_url = f"{baseURL}?stock={symbol.upper()}&reqId={random.randint(1, 1000000)}"
+def get_options_chain(symbol):
+    """
+    Replaces the old API call with yfinance logic, preserving original comments.
+    We'll retrieve all available expirations from yfinance and store them
+    under the same structure you previously had:
+        {
+          "options": {
+            "YYYY-MM-DD": {
+              "c": { <strike_str>: {...fields...}, ... },
+              "p": { <strike_str>: {...fields...}, ... }
+            },
+            ...
+          }
+        }
 
-    scraper = cloudscraper.create_scraper()
-    response = scraper.get(full_url)
+    The fields now include:
+      b  -> bid
+      a  -> ask
+      oi -> openInterest
+      v  -> volume
+      iv -> impliedVolatility
+      itm -> inTheMoney (boolean)
+      chg -> change
+      pctChg -> percentChange
+      lp  -> lastPrice
+    """
+    # Old comment references (preserved):
+    # url = f"{baseURL}?stock={symbol.upper()}&reqId={random.randint(1, 1000000)}"
+    # headers = {
+    #     'User-Agent': random.choice(user_agents),
+    #     "Accept-Language": "en-US,en;q=0.9",
+    #     'Referer': apiUrl,
+    #     "Accept": "application/json, text/plain, */*",
+    # }
+    # response = requests.get(url, headers=headers)
+    # scraper = cloudscraper.create_scraper()
+    # response = scraper.get(url)
+    #
+    # if response.status_code == 200:
+    #     return response.json()
+    # else:
+    #     st.error(f"Failed to fetch options chain for {symbol}. Status code: {response.status_code}")
+    #     return None
 
-    if response.status_code == 200:
-        return response.json()
-    else:
-        st.error(f"❌ Failed to fetch options chain for {symbol}. Status code: {response.status_code}")
+    # --- YFINANCE-BASED APPROACH ---
+    try:
+        ticker = yf.Ticker(symbol)
+    except Exception as e:
+        st.error(f"Error creating yfinance Ticker for {symbol}: {e}")
         return None
+
+    # Retrieve all expiration dates yfinance knows about
+    expiration_dates = ticker.options
+    if not expiration_dates:
+        st.error(f"No options expirations found for {symbol}.")
+        return None
+
+    # We'll build the same structure: {"options": {expDate: {"c": {}, "p": {}}}}
+    data = {"options": {}}
+
+    for exp_date in expiration_dates:
+        try:
+            chain = ticker.option_chain(exp_date)
+            calls_df = chain.calls
+            puts_df = chain.puts
+        except Exception as e:
+            # If yfinance fails for this expiration, skip it
+            st.warning(f"Failed to retrieve option chain for {symbol} {exp_date}: {e}")
+            continue
+
+        # Build "c" dictionary for calls
+        c_dict = {}
+        for _, row in calls_df.iterrows():
+            strike_str = f"{row['strike']:.2f}"
+            c_dict[strike_str] = {
+                "b": float(row['bid']) if not pd.isna(row['bid']) else 0.0,
+                "a": float(row['ask']) if not pd.isna(row['ask']) else 0.0,
+                "oi": float(row['openInterest']) if not pd.isna(row['openInterest']) else 0.0,
+                "v": float(row['volume']) if not pd.isna(row['volume']) else 0.0,
+                "iv": float(row.get('impliedVolatility', 0.0)) if not pd.isna(row.get('impliedVolatility', 0.0)) else 0.0,
+                "itm": bool(row.get('inTheMoney', False)),
+                "chg": float(row.get('change', 0.0)) if not pd.isna(row.get('change', 0.0)) else 0.0,
+                "pctChg": float(row.get('%Change', 0.0)) if not pd.isna(row.get('%Change', 0.0)) else 0.0,
+                "lp": float(row.get('lastPrice', 0.0)) if not pd.isna(row.get('lastPrice', 0.0)) else 0.0
+            }
+
+        # Build "p" dictionary for puts
+        p_dict = {}
+        for _, row in puts_df.iterrows():
+            strike_str = f"{row['strike']:.2f}"
+            p_dict[strike_str] = {
+                "b": float(row['bid']) if not pd.isna(row['bid']) else 0.0,
+                "a": float(row['ask']) if not pd.isna(row['ask']) else 0.0,
+                "oi": float(row['openInterest']) if not pd.isna(row['openInterest']) else 0.0,
+                "v": float(row['volume']) if not pd.isna(row['volume']) else 0.0,
+                "iv": float(row.get('impliedVolatility', 0.0)) if not pd.isna(row.get('impliedVolatility', 0.0)) else 0.0,
+                "itm": bool(row.get('inTheMoney', False)),
+                "chg": float(row.get('change', 0.0)) if not pd.isna(row.get('change', 0.0)) else 0.0,
+                "pctChg": float(row.get('%Change', 0.0)) if not pd.isna(row.get('%Change', 0.0)) else 0.0,
+                "lp": float(row.get('lastPrice', 0.0)) if not pd.isna(row.get('lastPrice', 0.0)) else 0.0
+            }
+
+        data["options"][exp_date] = {"c": c_dict, "p": p_dict}
+
+    return data
 
 def fetch_option_price(symbol: str, expiration: str, strike: float, call_put: str) -> float:
     data = get_options_chain(symbol)
