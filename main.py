@@ -8,6 +8,7 @@ import os
 from supabase import create_client, Client
 import yfinance as yf
 from zoneinfo import ZoneInfo
+import altair as alt
 
 # -------------------------------------------------------------------------
 # 1) Supabase / Environment Setup
@@ -242,10 +243,11 @@ def refresh_all_once():
         st.session_state["did_refresh"] = False
 
     if not st.session_state["did_refresh"]:
-        refresh_shares_prices()
-        refresh_options_prices()
-        record_daily_performance()
-        st.session_state["did_refresh"] = True
+        with st.spinner('Fetching Position Values...'):
+            refresh_shares_prices()
+            refresh_options_prices()
+            record_daily_performance()
+            st.session_state["did_refresh"] = True
 
 # -------------------------------------------------------------------------
 # 6) Helper for Color-coding Unrealized P/L cells
@@ -679,20 +681,22 @@ def show_portfolio_data(is_admin: bool):
     with tab_perf:
         st.markdown("## Performance History 📊")
         perf_df = load_performance()
-        if perf_df.empty:
-            st.info("No performance records yet. 📉")
-        else:
+        if not perf_df.empty:
             perf_df = perf_df.sort_values("date")
-            st.line_chart(perf_df.set_index("date")["total_value"], height=300)
-            st.dataframe(
-                perf_df.style.format({"total_value": "${:,.2f}"}),
-                use_container_width=True
+            perf_df.rename(columns={'date': 'Date', 'total_value': 'Portfolio Value'}, inplace=True)
+            chart = (
+                alt.Chart(perf_df)
+                .mark_line()
+                .encode(
+                    x="Date:T",
+                    y=alt.Y("Portfolio Value:Q", scale=alt.Scale(zero=False)),  # Ensure y-axis dynamically scales
+                )
+                .properties(height=300, width="container")
             )
 
-        st.caption(
-            "📅 Performance is **automatically recorded once per session** (first load), "
-            "overwriting today's record if present."
-        )
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            st.info("No performance records yet. 📉")
 
 if __name__ == "__main__":
     main()
