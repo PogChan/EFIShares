@@ -9,7 +9,6 @@ from supabase import create_client, Client
 import yfinance as yf
 from zoneinfo import ZoneInfo
 
-
 # -------------------------------------------------------------------------
 # 1) Supabase / Environment Setup
 # -------------------------------------------------------------------------
@@ -27,10 +26,8 @@ baseURL = st.secrets["BASEAPI"]
 def get_options_chain(symbol: str):
     time.sleep(1)  # simulate some network delay
     full_url = f"{baseURL}?stock={symbol.upper()}&reqId={random.randint(1, 1000000)}"
-
     scraper = cloudscraper.create_scraper()
     response = scraper.get(full_url)
-
     if response.status_code == 200:
         return response.json()
     else:
@@ -187,7 +184,6 @@ def refresh_options_prices():
         opt_id = row["id"]
         symbol = row["symbol"]
         call_put = row["call_put"]
-        # Force to string YYYY-MM-DD for fetch
         expiration_dt = row["expiration"]
         expiration_str = expiration_dt.strftime("%Y-%m-%d") if not isinstance(expiration_dt, str) else expiration_dt
 
@@ -213,7 +209,6 @@ def refresh():
     time.sleep(1)
     st.rerun()
 
-
 def record_daily_performance():
     """
     Sums up:
@@ -222,35 +217,23 @@ def record_daily_performance():
       - plus unused capital (buying power)
     Then upserts into the 'performance' table using today's date.
     """
-
-    # 1) Load current shares
     shares_df = load_shares()
     total_shares_val = (shares_df["shares_held"] * shares_df["current_price"]).sum() if not shares_df.empty else 0.0
 
-    # 2) Load current options
     opt_df = load_options()
     total_opts_val = ((opt_df["contracts_held"] * 100) * opt_df["current_price"]).sum() if not opt_df.empty else 0.0
 
-    # 3) Compute how much original capital is left (buying power)
-    #    We'll fetch the row from 'settings' table to get original_capital
     settings_df = load_settings()
     if not settings_df.empty:
         original_cap_def = float(settings_df.iloc[0]["original_capital"])
     else:
         original_cap_def = 0.0
 
-    # Sums of money spent on shares & options
     spent_shares_val = (shares_df["shares_held"] * shares_df["avg_cost"]).sum() if not shares_df.empty else 0.0
     spent_opts_val = ((opt_df["contracts_held"] * 100) * opt_df["avg_cost"]).sum() if not opt_df.empty else 0.0
-
-    # Buying Power = original capital - money spent on shares & options
     buying_power = original_cap_def - spent_shares_val - spent_opts_val
-
-    # 4) The "Total Account Value" now includes:
-    #    shares + options + leftover cash (buying_power)
     total_val = float(total_shares_val + total_opts_val + buying_power)
 
-    # 5) Upsert into performance table with today's date
     today_str = datetime.date.today().strftime("%Y-%m-%d")
     upsert_performance(today_str, total_val)
 
@@ -278,16 +261,11 @@ def color_unreal_pl(val):
 # -------------------------------------------------------------------------
 # 7) Logging Activity: shares or options
 # -------------------------------------------------------------------------
-
 def get_est_time():
-    # Get current time in UTC and convert to EST
     now_est = datetime.datetime.now(ZoneInfo("America/New_York"))
     return now_est.strftime("%m/%d/%Y %I:%M%p")
 
 def log_shares_activity(ticker: str, shares_added: float, price: float):
-    """
-    Log share activity, highlighting the action type, quantity, price, and total cost.
-    """
     action = "BOUGHT" if shares_added > 0 else "SOLD"
     color = "#65FE08" if shares_added > 0 else "red"
     sign = "+" if shares_added > 0 else ""
@@ -295,16 +273,15 @@ def log_shares_activity(ticker: str, shares_added: float, price: float):
     now_str = get_est_time()
 
     msg = (
-        f"<b style='color:{color};'>{action} {sign}{shares_added} shares</b> of <b style='color:#FFD700;'>{ticker}</b> "
-        f"at <b>\${price:,.2f}</b> (Total: <b style='color:{color};'>{sign}\${abs(cost):,.2f}</b>) "
+        f"<b style='color:{color};'>{action} {sign}{shares_added} shares</b> "
+        f"of <b style='color:#FFD700;'>{ticker}</b> "
+        f"at <b>${price:,.2f}</b> "
+        f"(Total: <b style='color:{color};'>{sign}${abs(cost):,.2f}</b>) "
         f"on {now_str}"
     )
     log_activity(msg)
 
 def log_options_activity(opt_id, symbol, call_put, expiration, strike, contracts_added, price):
-    """
-    Log options activity, highlighting the action type, quantity, price, total cost, and expiration.
-    """
     action = "BOUGHT" if contracts_added > 0 else "SOLD"
     color = "#65FE08" if contracts_added > 0 else "red"
     sign = "+" if contracts_added > 0 else ""
@@ -315,40 +292,63 @@ def log_options_activity(opt_id, symbol, call_put, expiration, strike, contracts
     msg = (
         f"<b style='color:{color};'>{action} {sign}{contracts_added} contract(s)</b> of "
         f"<b style='color:#FFD700;'> {symbol} {strike:.2f} {call_put} {exp_str}</b> "
-        f"at <b>\${price:,.2f}</b> (Total: <b style='color:{color};'>{sign}\${abs(total_cost):,.2f}</b>) "
+        f"at <b>${price:,.2f}</b> "
+        f"(Total: <b style='color:{color};'>{sign}${abs(total_cost):,.2f}</b>) "
         f"on {now_str}"
     )
     log_activity(msg)
 
 # -------------------------------------------------------------------------
-# 8) Main App
+# 8) Main App with Password Gate
 # -------------------------------------------------------------------------
 def main():
     st.set_page_config(page_title="EFI Portfolio Tracker", layout="wide")
-    st.title("EFI Portfolio Tracker ⚡")
+    
+    # Initialize 'is_admin' in session state
+    if "is_admin" not in st.session_state:
+        st.session_state["is_admin"] = False
+    
+    # If user is NOT admin, prompt for password & show view-only
+    if not st.session_state["is_admin"]:
+        st.title("EFI Portfolio Tracker ⚡ (View-Only)")
+        
+        # Ask for admin password to unlock editing
+        input_password = st.text_input("Enter admin password to edit:", type="password")
+        if st.button("Login"):
+            if input_password == st.secrets["ADMIN_PASSWORD"]:  # <-- Must add 'ADMIN_PASSWORD' to your Streamlit secrets
+                st.session_state["is_admin"] = True
+                st.rerun()
+            else:
+                st.error("Wrong password!")
+        
+        # We still want to run refresh and show the data, but no editing
+        refresh_all_once()
+        show_portfolio_data(is_admin=False)  # Custom helper below
+    else:
+        # Admin mode
+        st.title("EFI Portfolio Tracker ⚡ (Admin)")
+        
+        if st.button("Logout"):
+            st.session_state["is_admin"] = False
+            st.rerun()
+        
+        # Run refresh and show full UI
+        refresh_all_once()
+        show_portfolio_data(is_admin=True)
 
-    st.spinner('Updating Portfolio Values...')
-    # 1) Automatic refresh once per session
-    refresh_all_once()
-
-    # 2) Load settings
+def show_portfolio_data(is_admin: bool):
+    """
+    Show the entire portfolio data, with or without editing widgets
+    based on is_admin boolean.
+    """
+    # 1) Load settings
     settings_df = load_settings()
     if not settings_df.empty:
         original_cap_def = float(settings_df.iloc[0]["original_capital"])
     else:
         original_cap_def = 0.0
 
-    # 3) Account Settings
-    st.subheader("Account Settings")
-    colA = st.columns(5)
-
-    orig_capital = colA[0].number_input(
-        "Original Starting Capital ($)",
-        value=original_cap_def,
-        step=1000.0,
-        key="orig_capital"
-    )
-
+    # 2) Basic account stats
     shares_df = load_shares()
     total_shares_val = (shares_df["shares_held"] * shares_df["current_price"]).sum() if not shares_df.empty else 0.0
 
@@ -358,31 +358,38 @@ def main():
     spent_shares_val = (shares_df["shares_held"] * shares_df["avg_cost"]).sum() if not shares_df.empty else 0.0
     spent_opts_val = ((opt_df["contracts_held"] * 100) * opt_df["avg_cost"]).sum() if not opt_df.empty else 0.0
 
-    buying_power = orig_capital - spent_shares_val - spent_opts_val
+    buying_power = original_cap_def - spent_shares_val - spent_opts_val
     total_account_val = float(total_shares_val + total_opts_val + buying_power)
-
     percent_bp = (buying_power / total_account_val * 100) if total_account_val != 0 else 0
 
-    colA[1].number_input("Total Account ($)", value=total_account_val, step=500.0, disabled=True, key="acct_disabled")
-    colA[2].number_input("Shares Portion ($)", value=total_shares_val, step=500.0, disabled=True, key="shares_disabled")
-    colA[3].number_input("Options Portion ($)", value=total_opts_val, step=500.0, disabled=True, key="opts_disabled")
+    colA = st.columns(5)
+    colA[0].number_input(
+        "Original Starting Capital ($)",
+        value=original_cap_def,
+        step=1000.0,
+        key="orig_capital",
+        disabled=(not is_admin)
+    )
+
+    colA[1].number_input("Total Account ($)", value=total_account_val, step=500.0, disabled=True)
+    colA[2].number_input("Shares Portion ($)", value=total_shares_val, step=500.0, disabled=True)
+    colA[3].number_input("Options Portion ($)", value=total_opts_val, step=500.0, disabled=True)
     colA[4].number_input(
         f"Buying Power ($) - {percent_bp:.2f}%",
         value=buying_power,
         step=500.0,
-        disabled=True,
-        key="bp_disabled"
+        disabled=True
     )
 
-    if st.button("💾 Save Original Capital"):
-        save_settings(orig_capital)
-        st.success("💾 Saved Original Capital!")
+    # Only show "Save Original Capital" button if admin
+    if is_admin:
+        if st.button("💾 Save Original Capital"):
+            save_settings(st.session_state["orig_capital"])
+            st.success("💾 Saved Original Capital!")
 
     st.write("---")
 
-    # ---------------------------------------------------------------------
     # Activity Log Expander
-    # ---------------------------------------------------------------------
     with st.expander("Recent Activity Log"):
         activity_df = load_activity()
         if activity_df.empty:
@@ -393,21 +400,19 @@ def main():
 
     st.write("---")
 
-    # 4) TABS: Shares, Options, Performance
+    # TABS
     tab_shares, tab_opts, tab_perf = st.tabs(["📈 Shares", "🧩 Options", "📊 Performance"])
 
-    # -------------------------- SHARES TAB --------------------------
+    # --------------------- SHARES TAB ---------------------
     with tab_shares:
         st.markdown("## Shares Portfolio 🚀")
-        shares_df = load_shares()  # re-load
-
+        shares_df = load_shares()
         if shares_df.empty:
-            st.info("No shares in portfolio yet. Add some below! 🌱")
+            st.info("No shares in portfolio yet. Add some below! 🌱" if is_admin else "No shares in portfolio yet.")
         else:
             df_disp = shares_df.copy()
             df_disp["Position Value"] = df_disp["shares_held"] * df_disp["current_price"]
             df_disp["Currently Invested"] = df_disp["shares_held"] * df_disp["avg_cost"]
-
             if total_account_val > 0:
                 df_disp["% of Portfolio"] = (df_disp["Position Value"] / total_account_val) * 100
             else:
@@ -440,83 +445,83 @@ def main():
                     "Unrealized P/L": money,
                     "% of Portfolio": percent
                 })
-                .map(color_unreal_pl, subset=["Unrealized P/L"])
+                .applymap(color_unreal_pl, subset=["Unrealized P/L"])
             )
-            row_height = 38  # Approximate height of each row in pixels
+            row_height = 38  
             num_rows = len(df_disp)
-            dynamic_height = min(800, num_rows * row_height)  # Limit max height if necessary
+            dynamic_height = min(800, num_rows * row_height)
 
             st.dataframe(styled_shares, use_container_width=True, height=dynamic_height)
 
-        st.subheader("Add / Update Shares 🏗️")
-        tickers_list = shares_df["ticker"].tolist() if not shares_df.empty else []
-        sel_share = st.selectbox("Select existing Ticker or create new", tickers_list + ["(New)"], key="sel_share")
+        # Show editing form only if admin
+        if is_admin:
+            st.subheader("Add / Update Shares 🏗️")
+            tickers_list = shares_df["ticker"].tolist() if not shares_df.empty else []
+            sel_share = st.selectbox("Select existing Ticker or create new", tickers_list + ["(New)"])
 
-        if sel_share == "(New)":
-            new_ticker = st.text_input("New Ticker Symbol (e.g. AAPL)", key="new_ticker_shares")
-            ticker_val = new_ticker.upper()
-            old_shares, old_avg = 0.0, 0.0
-        else:
-            ticker_val = sel_share
-            existing_row = shares_df[shares_df["ticker"] == ticker_val]
-            if not existing_row.empty:
-                old_shares = float(existing_row["shares_held"].iloc[0])
-                old_avg = float(existing_row["avg_cost"].iloc[0])
-            else:
+            if sel_share == "(New)":
+                new_ticker = st.text_input("New Ticker Symbol (e.g. AAPL)", key="new_ticker_shares")
+                ticker_val = new_ticker.upper()
                 old_shares, old_avg = 0.0, 0.0
-
-        shares_to_add = st.number_input("Shares to Add (negative to reduce)", step=1.0, key="shares_to_add")
-        purchase_price = st.number_input(
-            "Filled Price per share",
-            value=fetch_share_price(ticker_val) if ticker_val else 0.0,
-            step=1.0,
-            key="purchase_price_shares"
-        )
-
-        if st.button("Submit (Shares)"):
-            total_shares = old_shares + shares_to_add
-            if total_shares < 0:
-                st.error("Cannot have negative total shares.")
-                st.stop()
-            elif total_shares == 0:
-                # user sold out fully
-                delete_share(ticker_val)
-                st.warning(f"Position closed for {ticker_val}.")
-                log_shares_activity(ticker_val, shares_to_add, purchase_price)
-                # Log activity only if shares_to_add != 0 and not a full mistake
-                # but we skip it since it's a full delete
-                refresh()
             else:
-                new_avg = 0.0
-                if (old_shares + shares_to_add) != 0:
-                    new_avg = (old_shares * old_avg + shares_to_add * purchase_price) / (old_shares + shares_to_add)
+                ticker_val = sel_share
+                existing_row = shares_df[shares_df["ticker"] == ticker_val]
+                if not existing_row.empty:
+                    old_shares = float(existing_row["shares_held"].iloc[0])
+                    old_avg = float(existing_row["avg_cost"].iloc[0])
+                else:
+                    old_shares, old_avg = 0.0, 0.0
 
-                current_px = fetch_share_price(ticker_val)
-                upsert_share(ticker_val, total_shares, new_avg, current_px)
-                # Log activity if shares_to_add != 0
-                if shares_to_add != 0:
-                    log_shares_activity(ticker_val, shares_to_add, purchase_price)
-                st.success(f"✅ Updated {ticker_val} with total shares={total_shares:.2f}, avg_cost={new_avg:.2f}")
-                refresh()
-        st.subheader("Delete Entire Share Position 🗑️")
-        del_ticker_sh = st.selectbox("Select Ticker to Delete Entirely", ["(None)"] + tickers_list, key="del_sh_sel")
-        if del_ticker_sh != "(None)":
-            if st.button("Confirm Delete (Shares)"):
-                delete_share(del_ticker_sh)
-                st.warning(f"🗑️ Deleted entire {del_ticker_sh} share position.")
-                refresh()
-    # -------------------------- OPTIONS TAB --------------------------
+            shares_to_add = st.number_input("Shares to Add (negative to reduce)", step=1.0)
+            purchase_price = st.number_input(
+                "Filled Price per share",
+                value=fetch_share_price(ticker_val) if ticker_val else 0.0,
+                step=1.0
+            )
+
+            if st.button("Submit (Shares)"):
+                total_shares = old_shares + shares_to_add
+                if total_shares < 0:
+                    st.error("Cannot have negative total shares.")
+                    st.stop()
+                elif total_shares == 0:
+                    delete_share(ticker_val)
+                    st.warning(f"Position closed for {ticker_val}.")
+                    # Log the activity
+                    if shares_to_add != 0:
+                        log_shares_activity(ticker_val, shares_to_add, purchase_price)
+                    refresh()
+                else:
+                    new_avg = 0.0
+                    if (old_shares + shares_to_add) != 0:
+                        new_avg = (old_shares * old_avg + shares_to_add * purchase_price) / (old_shares + shares_to_add)
+
+                    current_px = fetch_share_price(ticker_val)
+                    upsert_share(ticker_val, total_shares, new_avg, current_px)
+
+                    if shares_to_add != 0:
+                        log_shares_activity(ticker_val, shares_to_add, purchase_price)
+                    st.success(f"✅ Updated {ticker_val} with total shares={total_shares:.2f}, avg_cost={new_avg:.2f}")
+                    refresh()
+
+            st.subheader("Delete Entire Share Position 🗑️")
+            del_ticker_sh = st.selectbox("Select Ticker to Delete Entirely", ["(None)"] + tickers_list)
+            if del_ticker_sh != "(None)":
+                if st.button("Confirm Delete (Shares)"):
+                    delete_share(del_ticker_sh)
+                    st.warning(f"🗑️ Deleted entire {del_ticker_sh} share position.")
+                    refresh()
+
+    # --------------------- OPTIONS TAB ---------------------
     with tab_opts:
         st.markdown("## Options Portfolio 🔧")
-        opt_df = load_options()  # re-load
-
+        opt_df = load_options()
         if opt_df.empty:
-            st.info("No options in portfolio yet. Add some below! 🤔")
+            st.info("No options in portfolio yet." if not is_admin else "No options in portfolio yet. Add some below! 🤔")
         else:
             df_o = opt_df.copy()
             df_o["Position Value"] = df_o["contracts_held"] * 100 * df_o["current_price"]
             df_o["Currently Invested"] = df_o["contracts_held"] * 100 * df_o["avg_cost"]
-
             if total_account_val > 0:
                 df_o["% of Portfolio"] = (df_o["Position Value"] / total_account_val) * 100
             else:
@@ -554,112 +559,105 @@ def main():
                     "Unrealized P/L": money,
                     "% of Portfolio": percent
                 })
-                .map(color_unreal_pl, subset=["Unrealized P/L"])
+                .applymap(color_unreal_pl, subset=["Unrealized P/L"])
             )
-            row_height = 38  # Approximate height of each row in pixels
+            row_height = 38
             num_rows = len(df_o)
-            dynamic_height = min(800, num_rows * row_height)  # Limit max height if necessary
+            dynamic_height = min(800, num_rows * row_height)
 
-            st.dataframe(
-                styled_opts,
-                use_container_width=True,
-                height=dynamic_height
-            )
+            st.dataframe(styled_opts, use_container_width=True, height=dynamic_height)
 
-        st.subheader("Add / Update an Option 🔧")
-        existing_opts = []
-        if not opt_df.empty:
-            for _, ro in opt_df.iterrows():
-                row_label = f"{ro['id']}: {ro['symbol']} {ro['call_put']} {ro['strike']} exp={ro['expiration']}"
-                existing_opts.append(row_label)
+        # Show editing only if admin
+        if is_admin:
+            st.subheader("Add / Update an Option 🔧")
+            existing_opts = []
+            if not opt_df.empty:
+                for _, ro in opt_df.iterrows():
+                    row_label = f"{ro['id']}: {ro['symbol']} {ro['call_put']} {ro['strike']} exp={ro['expiration']}"
+                    existing_opts.append(row_label)
 
-        chosen_opt = st.selectbox("Select existing Option or (New)", existing_opts + ["(New)"], key="chosen_opt")
-        if chosen_opt == "(New)":
-            opt_id = None
-            symbol_input = st.text_input("Option Symbol (e.g. SPY)", key="opt_symbol_new")
-            call_put_input = st.selectbox("CALL or PUT", ["CALL", "PUT"], key="opt_cp_new")
-            exp_in = st.date_input("Expiration Date", key="opt_exp_new")
-            strike_in = st.number_input("Strike", step=1.0, key="opt_strike_new")
+            chosen_opt = st.selectbox("Select existing Option or (New)", existing_opts + ["(New)"])
+            if chosen_opt == "(New)":
+                opt_id = None
+                symbol_input = st.text_input("Option Symbol (e.g. SPY)")
+                call_put_input = st.selectbox("CALL or PUT", ["CALL", "PUT"])
+                exp_in = st.date_input("Expiration Date")
+                strike_in = st.number_input("Strike", step=1.0)
+                old_contracts = 0.0
+                old_avg = 0.0
+            else:
+                row_id = int(chosen_opt.split(":")[0])
+                row_data = opt_df[opt_df["id"] == row_id].squeeze()
+                opt_id = row_id
+                symbol_input = row_data["symbol"]
+                call_put_input = row_data["call_put"]
+                exp_in = row_data["expiration"]
+                strike_in = float(row_data["strike"])
+                old_contracts = float(row_data["contracts_held"])
+                old_avg = float(row_data["avg_cost"])
 
-            old_contracts = 0.0
-            old_avg = 0.0
-        else:
-            row_id = int(chosen_opt.split(":")[0])
-            row_data = opt_df[opt_df["id"] == row_id].squeeze()
-            opt_id = row_id
-            symbol_input = row_data["symbol"]
-            call_put_input = row_data["call_put"]
-            exp_in = row_data["expiration"]
-            strike_in = float(row_data["strike"])
-            old_contracts = float(row_data["contracts_held"])
-            old_avg = float(row_data["avg_cost"])
+            contracts_to_add = st.number_input("Contracts to Add (negative to reduce)", step=1.0)
+            purchase_price_opt = st.number_input("Filled Price (per contract)", step=1.0)
 
-        contracts_to_add = st.number_input("Contracts to Add (negative to reduce)", step=1.0, key="contracts_to_add")
-        purchase_price_opt = st.number_input("Filled Price (per contract)", step=1.0, key="purchase_price_opt")
+            if isinstance(exp_in, datetime.date):
+                exp_str = exp_in.strftime("%Y-%m-%d")
+            else:
+                exp_str = str(exp_in)
 
-        # Format expiration as %Y-%m-%d for fetch
-        if isinstance(exp_in, datetime.date):
-            exp_str = exp_in.strftime("%Y-%m-%d")
-        else:
-            exp_str = str(exp_in)
+            if st.button("Submit (Options)"):
+                total_contracts = old_contracts + contracts_to_add
+                if total_contracts < 0:
+                    st.error("Cannot have negative total contracts.")
+                    st.stop()
+                elif total_contracts == 0:
+                    if opt_id is not None:
+                        delete_option(opt_id)
+                        st.warning("Option closed out entirely. 🗑️")
+                        if contracts_to_add != 0:
+                            log_options_activity(
+                                opt_id, symbol_input, call_put_input, exp_str, strike_in,
+                                contracts_to_add, purchase_price_opt
+                            )
+                        refresh()
+                else:
+                    new_avg_opt = 0.0
+                    if old_contracts + contracts_to_add != 0:
+                        new_avg_opt = (
+                            (old_contracts * old_avg) + (contracts_to_add * purchase_price_opt)
+                        ) / (old_contracts + contracts_to_add)
 
-        if st.button("Submit (Options)"):
-            total_contracts = old_contracts + contracts_to_add
-            if total_contracts < 0:
-                st.error("Cannot have negative total contracts.")
-                st.stop()
-            elif total_contracts == 0:
-                if opt_id is not None:
-                    delete_option(opt_id)
-                    st.warning("Option closed out entirely. 🗑️")
-                    # Do not log because it's a full delete
-                    log_options_activity(
-                        opt_id, symbol_input, call_put_input, exp_str, strike_in,
-                        contracts_to_add, purchase_price_opt
+                    current_opt_px = fetch_option_price(symbol_input, exp_str, strike_in, call_put_input)
+                    upsert_option(
+                        opt_id,
+                        symbol_input,
+                        call_put_input,
+                        exp_str,
+                        strike_in,
+                        total_contracts,
+                        new_avg_opt,
+                        current_opt_px
+                    )
+                    if contracts_to_add != 0:
+                        log_options_activity(
+                            opt_id, symbol_input, call_put_input, exp_str, strike_in,
+                            contracts_to_add, purchase_price_opt
+                        )
+                    st.success(
+                        f"✅ Updated Option: {symbol_input} {call_put_input}, "
+                        f"total_contracts={total_contracts:.2f}, avg={new_avg_opt:.2f}"
                     )
                     refresh()
-            else:
-                new_avg_opt = 0.0
-                if old_contracts + contracts_to_add != 0:
-                    new_avg_opt = (
-                        (old_contracts * old_avg) + (contracts_to_add * purchase_price_opt)
-                    ) / (old_contracts + contracts_to_add)
 
+            st.subheader("Delete an Option Entirely 🗑️")
+            del_opt_sel = st.selectbox("Select Option to Delete", ["(None)"] + existing_opts)
+            if del_opt_sel != "(None)":
+                if st.button("Confirm Delete (Option)"):
+                    del_id = int(del_opt_sel.split(":")[0])
+                    delete_option(del_id)
+                    st.warning(f"🗑️ Deleted option ID {del_id}.")
+                    refresh()
 
-                current_opt_px = fetch_option_price(symbol_input, exp_str, strike_in, call_put_input)
-
-                upsert_option(
-                    opt_id,
-                    symbol_input,
-                    call_put_input,
-                    exp_str,
-                    strike_in,
-                    total_contracts,
-                    new_avg_opt,
-                    current_opt_px
-                )
-                # Log only if we're not fully deleting
-                if contracts_to_add != 0:
-                    log_options_activity(
-                        opt_id, symbol_input, call_put_input, exp_str, strike_in,
-                        contracts_to_add, purchase_price_opt
-                    )
-                st.success(
-                    f"✅ Updated Option: {symbol_input} {call_put_input}, "
-                    f"total_contracts={total_contracts:.2f}, avg={new_avg_opt:.2f}"
-                )
-                refresh()
-
-        st.subheader("Delete an Option Entirely 🗑️")
-        del_opt_sel = st.selectbox("Select Option to Delete", ["(None)"] + existing_opts, key="del_opt_sel")
-        if del_opt_sel != "(None)":
-            if st.button("Confirm Delete (Option)"):
-                del_id = int(del_opt_sel.split(":")[0])
-                delete_option(del_id)
-                st.warning(f"🗑️ Deleted option ID {del_id}.")
-                refresh()
-
-    # -------------------------- PERFORMANCE TAB --------------------------
+    # --------------------- PERFORMANCE TAB ---------------------
     with tab_perf:
         st.markdown("## Performance History 📊")
         perf_df = load_performance()
@@ -677,7 +675,6 @@ def main():
             "📅 Performance is **automatically recorded once per session** (first load), "
             "overwriting today's record if present."
         )
-
 
 if __name__ == "__main__":
     main()
