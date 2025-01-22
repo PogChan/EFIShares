@@ -464,7 +464,7 @@ def show_portfolio_data(is_admin: bool):
                     "Unrealized P/L": money,
                     "% of Portfolio": percent
                 })
-                .applymap(color_unreal_pl, subset=["Unrealized P/L"])
+                .map(color_unreal_pl, subset=["Unrealized P/L"])
             )
             row_height = 38  
             num_rows = len(df_disp)
@@ -577,7 +577,7 @@ def show_portfolio_data(is_admin: bool):
                     "Unrealized P/L": money,
                     "% of Portfolio": percent
                 })
-                .applymap(color_unreal_pl, subset=["Unrealized P/L"])
+                .map(color_unreal_pl, subset=["Unrealized P/L"])
             )
             row_height = 38
             num_rows = len(df_o)
