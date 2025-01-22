@@ -370,10 +370,29 @@ def show_portfolio_data(is_admin: bool):
         key="orig_capital",
         disabled=(not is_admin)
     )
+    # Calculate percentages for shares and options
+    shares_percentage = (total_shares_val / total_account_val * 100) if total_account_val > 0 else 0
+    options_percentage = (total_opts_val / total_account_val * 100) if total_account_val > 0 else 0
 
-    colA[1].number_input("Total Account ($)", value=total_account_val, step=500.0, disabled=True)
-    colA[2].number_input("Shares Portion ($)", value=total_shares_val, step=500.0, disabled=True)
-    colA[3].number_input("Options Portion ($)", value=total_opts_val, step=500.0, disabled=True)
+    # Display Total Account and portions with percentages
+    colA[1].number_input(
+        "Total Account ($)", 
+        value=total_account_val, 
+        step=500.0, 
+        disabled=True
+    )
+    colA[2].number_input(
+        f"Shares Portion ($) - {shares_percentage:.2f}%", 
+        value=total_shares_val, 
+        step=500.0, 
+        disabled=True
+    )
+    colA[3].number_input(
+        f"Options Portion ($) - {options_percentage:.2f}%", 
+        value=total_opts_val, 
+        step=500.0, 
+        disabled=True
+    )
     colA[4].number_input(
         f"Buying Power ($) - {percent_bp:.2f}%",
         value=buying_power,
