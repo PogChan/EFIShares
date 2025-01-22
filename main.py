@@ -468,7 +468,7 @@ def show_portfolio_data(is_admin: bool):
             )
             row_height = 40  
             num_rows = len(df_disp)
-            dynamic_height = max(300, num_rows * row_height)
+            dynamic_height = max(250, num_rows * row_height)
             st.dataframe(styled_shares, use_container_width=True, height=dynamic_height)
 
         # Show editing form only if admin
@@ -581,7 +581,7 @@ def show_portfolio_data(is_admin: bool):
             )
             row_height = 40
             num_rows = len(df_o)
-            dynamic_height = max(300, num_rows * row_height)
+            dynamic_height = max(250, num_rows * row_height)
 
             st.dataframe(styled_opts, use_container_width=True, height=dynamic_height)
 
