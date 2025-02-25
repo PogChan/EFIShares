@@ -1,5 +1,6 @@
 import streamlit as st
-
+st.set_page_config(page_title="EFI Portfolio Tracker", layout="wide")
+    
 
 import subprocess
 import sys
@@ -317,8 +318,7 @@ def log_options_activity(opt_id, symbol, call_put, expiration, strike, contracts
 # 8) Main App with Password Gate
 # -------------------------------------------------------------------------
 def main():
-    st.set_page_config(page_title="EFI Portfolio Tracker", layout="wide")
-    
+
     # Initialize 'is_admin' in session state
     if "is_admin" not in st.session_state:
         st.session_state["is_admin"] = False
